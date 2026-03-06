@@ -8,26 +8,7 @@ import joblib
 from model import LSTMFallDetector
 
 
-def load_sequences_for_inference(csv_path, scaler, feature_cols, seq_len):
-    df = pd.read_csv(csv_path)
-    for col in feature_cols:
-        if col not in df.columns:
-            raise ValueError(f"Column '{col}' not found in CSV")
-
-    X = df[feature_cols].values.astype(np.float32)
-    X_scaled = scaler.transform(X)
-
-    sequences = []
-    for i in range(len(X_scaled) - seq_len + 1):
-        seq_x = X_scaled[i : i + seq_len]
-        sequences.append(seq_x)
-
-    if not sequences:
-        raise ValueError("Not enough data to form even one sequence. Increase data or reduce seq_len.")
-
-    sequences = np.array(sequences)
-    return sequences
-
+from data_utils import load_sequences_for_inference
 
 def main():
     parser = argparse.ArgumentParser(description="Run inference with trained LSTM fall detection model")
@@ -35,6 +16,7 @@ def main():
     parser.add_argument("--data-path", type=str, required=True, help="Path to CSV file for inference")
     parser.add_argument("--scaler-path", type=str, default=None, help="Path to saved scaler.joblib (optional)")
     parser.add_argument("--meta-path", type=str, default=None, help="Path to saved meta.joblib (optional)")
+    parser.add_argument("--output-csv", type=str, default=None, help="Optional path to save predictions to a CSV file.")
 
     args = parser.parse_args()
 
@@ -67,9 +49,20 @@ def main():
         probs = torch.softmax(logits, dim=1)[:, 1]  # probability of 'fall' class
         preds = (probs >= 0.5).long().cpu().numpy()
 
+    results = []
     for i, (p, prob) in enumerate(zip(preds, probs.cpu().numpy())):
         label = "FALL" if p == 1 else "NO_FALL"
         print(f"Sequence {i}: {label} (fall probability = {prob:.3f})")
+        results.append({
+            "sequence_idx": i,
+            "prediction": label,
+            "fall_probability": prob
+        })
+
+    if args.output_csv:
+        out_df = pd.DataFrame(results)
+        out_df.to_csv(args.output_csv, index=False)
+        print(f"\nSaved predictions to {args.output_csv}")
 
 
 if __name__ == "__main__":
