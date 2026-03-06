@@ -6,6 +6,8 @@ import torch.nn as nn
 from torch.optim import Adam
 from sklearn.metrics import classification_report, confusion_matrix
 import joblib
+import matplotlib.pyplot as plt
+from datetime import datetime
 
 from data_utils import prepare_datasets, make_dataloaders
 from model import LSTMFallDetector
@@ -70,6 +72,7 @@ def main():
     parser.add_argument("--seq-len", type=int, default=5, help="Sequence length (number of time steps)")
     parser.add_argument("--batch-size", type=int, default=64, help="Batch size")
     parser.add_argument("--epochs", type=int, default=20, help="Number of training epochs")
+    parser.add_argument("--patience", type=int, default=5, help="Early stopping patience (epochs without improvement)")
     parser.add_argument("--hidden-size", type=int, default=64, help="LSTM hidden size")
     parser.add_argument("--num-layers", type=int, default=2, help="Number of LSTM layers")
     parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
@@ -102,14 +105,26 @@ def main():
     optimizer = Adam(model.parameters(), lr=args.lr)
 
     best_val_acc = 0.0
-    os.makedirs(args.model_dir, exist_ok=True)
-    model_path = os.path.join(args.model_dir, "best_model.pt")
-    scaler_path = os.path.join(args.model_dir, "scaler.joblib")
-    meta_path = os.path.join(args.model_dir, "meta.joblib")
+    epochs_no_improve = 0
+    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    experiment_dir = os.path.join(args.model_dir, timestamp)
+    os.makedirs(experiment_dir, exist_ok=True)
+    
+    model_path = os.path.join(experiment_dir, "best_model.pt")
+    scaler_path = os.path.join(experiment_dir, "scaler.joblib")
+    meta_path = os.path.join(experiment_dir, "meta.joblib")
+    plot_path = os.path.join(experiment_dir, "training_history.png")
+
+    train_losses = []
+    val_losses = []
 
     for epoch in range(1, args.epochs + 1):
         train_loss, train_acc = train_one_epoch(model, train_loader, criterion, optimizer, device)
         val_loss, val_acc, _, _ = evaluate(model, val_loader, criterion, device)
+        
+        train_losses.append(train_loss)
+        val_losses.append(val_loss)
 
         print(
             f"Epoch {epoch}/{args.epochs} - "
@@ -119,10 +134,30 @@ def main():
 
         if val_acc > best_val_acc:
             best_val_acc = val_acc
+            epochs_no_improve = 0
             torch.save(model.state_dict(), model_path)
             joblib.dump(scaler, scaler_path)
             joblib.dump({"feature_cols": feature_cols, "seq_len": args.seq_len}, meta_path)
             print(f"Saved new best model with val acc = {best_val_acc:.4f}")
+        else:
+            epochs_no_improve += 1
+            if epochs_no_improve >= args.patience:
+                print(f"Early stopping triggered after {epoch} epochs.")
+                break
+
+    # Save training history plot
+    plt.figure(figsize=(10, 5))
+    plt.plot(range(1, len(train_losses) + 1), train_losses, label="Train Loss")
+    plt.plot(range(1, len(val_losses) + 1), val_losses, label="Validation Loss")
+    plt.xlabel("Epochs")
+    plt.ylabel("Loss")
+    plt.title("Training and Validation Loss over Epochs")
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(plot_path)
+    plt.close()
+    
+    print(f"Training history plot saved to {plot_path}")
 
     # Load best model for final evaluation
     model.load_state_dict(torch.load(model_path, map_location=device))
