@@ -10,23 +10,7 @@ import joblib
 from model import LSTMFallDetector
 
 
-def load_sequences_for_inference(df, scaler, feature_cols, seq_len):
-    for col in feature_cols:
-        if col not in df.columns:
-            raise ValueError(f"Column '{col}' not found in CSV")
-
-    X = df[feature_cols].values.astype(np.float32)
-    X_scaled = scaler.transform(X)
-
-    sequences = []
-    for i in range(len(X_scaled) - seq_len + 1):
-        seq_x = X_scaled[i : i + seq_len]
-        sequences.append(seq_x)
-
-    if not sequences:
-        raise ValueError("Not enough data to form even one sequence. Increase data or reduce seq_len.")
-
-    return np.array(sequences)
+from data_utils import load_sequences_for_inference
 
 
 class FallDetectionGUI:
@@ -43,6 +27,11 @@ class FallDetectionGUI:
         self._build_widgets()
 
     def _build_widgets(self):
+        self._build_model_frame()
+        self._build_csv_frame()
+        self._build_table()
+
+    def _build_model_frame(self):
         frame_top = tk.Frame(self.root)
         frame_top.pack(fill=tk.X, padx=10, pady=10)
 
@@ -53,6 +42,7 @@ class FallDetectionGUI:
         tk.Button(frame_top, text="Browse", command=self.browse_model_dir).pack(side=tk.LEFT)
         tk.Button(frame_top, text="Load Model", command=self.load_model).pack(side=tk.LEFT, padx=5)
 
+    def _build_csv_frame(self):
         frame_mid = tk.Frame(self.root)
         frame_mid.pack(fill=tk.X, padx=10, pady=10)
 
@@ -63,6 +53,7 @@ class FallDetectionGUI:
         tk.Button(frame_mid, text="Browse", command=self.browse_csv).pack(side=tk.LEFT)
         tk.Button(frame_mid, text="Run Detection", command=self.run_detection).pack(side=tk.LEFT, padx=5)
 
+    def _build_table(self):
         frame_stats = tk.Frame(self.root)
         frame_stats.pack(fill=tk.X, padx=10, pady=5)
 
@@ -143,7 +134,12 @@ class FallDetectionGUI:
             return
 
         try:
-            df = pd.read_csv(csv_path)
+            try:
+                df = pd.read_csv(csv_path)
+            except Exception as read_err:
+                messagebox.showerror("File Error", f"Could not read CSV: {read_err}")
+                return
+
             feature_cols = self.meta["feature_cols"]
             seq_len = self.meta["seq_len"]
 
